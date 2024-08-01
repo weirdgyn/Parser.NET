@@ -1,4 +1,7 @@
-﻿namespace ParserLib
+﻿using System;
+using System.Collections.Generic;
+
+namespace ParserLib
 {
     public class Parser(Parser.MessageType Type, byte SoM, byte EoM = 0x00)
     {
