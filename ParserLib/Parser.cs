@@ -3,9 +3,10 @@ using System.Collections.Generic;
 
 namespace ParserLib
 {
-    public class Parser(Parser.MessageType Type, byte SoM, byte EoM = 0x00)
+    public class Parser(byte SoM, byte EoM = 0x00)
     {
         #region Enums
+
         public enum ParserErrors
         {
             Checksum,
@@ -15,6 +16,7 @@ namespace ParserLib
             MissingId,
             SyncError
         }
+
         public enum ParserStatus
         {
             Idle,
@@ -23,21 +25,18 @@ namespace ParserLib
             WaitCheckSum,
             WaitEoM
         }
+
         public enum ParserResult { 
             Completed,
             Error,
             Parsing
         }
 
-        public enum MessageType
-        {
-            BoundedMessages,
-            SizedMessages
-        }
 
         #endregion
 
         #region Event handlers
+
         public class ParseCompletedEventArgs(byte id, List<byte> data) : EventArgs
         {
             public byte MessageId { get; } = id;
@@ -51,18 +50,27 @@ namespace ParserLib
         }
 
         public event EventHandler<ParseCompletedEventArgs>? OnParseCompleted;
+
         public event EventHandler<ParseErrorEventArgs>? OnParseError;
+
         #endregion
 
-        public class Descriptor(byte Id, bool CheckSum = false, int Size = 0)
-        {
+        public class Descriptor(byte Id, Descriptor.MessageType Type = Descriptor.MessageType.BoundedMessages, int Size = 0, bool CheckSum = false)
+        {        
+            public enum MessageType
+            {
+                BoundedMessages,
+                SizedMessages
+            }
+
             public byte Id { get; } = Id;
             public int Size { get; } = Size;
             public bool CheckSum { get; } = CheckSum;
+            public MessageType Type { get; } = Type;
 
-            public static Descriptor Create(byte Id, bool CheckSum = false, int Size = 0)
+            public static Descriptor Create(byte Id, MessageType Type = MessageType.BoundedMessages, int Size = 0, bool CheckSum = false)
             {
-                return new Descriptor(Id, CheckSum, Size);
+                return new Descriptor(Id, Type, Size, CheckSum);
             }
         }
 
@@ -111,6 +119,7 @@ namespace ParserLib
         #endregion
 
         #region Properties
+
         public byte SoM { get; } = SoM;
         public byte EoM { get; } = EoM;
 
@@ -118,9 +127,9 @@ namespace ParserLib
 
         public List<Descriptor> Descriptors { get; } = [];
 
-        public MessageType Type { get; } = Type;
 
         #endregion
+
         private Descriptor? GetDescriptor(byte id)
         {
             foreach (var descriptor in Descriptors)
@@ -132,14 +141,18 @@ namespace ParserLib
 
         public Parser AddDescriptor(Descriptor descriptor)
         {
-            if ((descriptor.Size == 0) && (Type == MessageType.SizedMessages))
-                throw new DescriptorSizeNotSet("Descriptor size not set");
-
             foreach (var descr in Descriptors)
                 if (descr.Id.Equals(descriptor.Id))
                     throw new DescriptorIdAliasing("Descriptor Id aliasing");
 
             Descriptors.Add(descriptor);
+
+            return this;
+        }
+
+        public Parser AddDescriptor(byte id)
+        {
+            Descriptors.Add(Descriptor.Create(id));
 
             return this;
         }
@@ -188,7 +201,7 @@ namespace ParserLib
                         _CheckSum += data;
 #pragma warning restore CS8602 // Dereferenziamento di un possibile riferimento Null.
 
-                    if (Type == MessageType.SizedMessages)
+                    if (_CurrentDescriptor.Type == Descriptor.MessageType.SizedMessages)
                     {
                         _DataSize--;
 
@@ -200,7 +213,7 @@ namespace ParserLib
                                 _Status = ParserStatus.WaitCheckSum;
                         }
                     }
-                    else if (Type == MessageType.BoundedMessages)
+                    else if (_CurrentDescriptor.Type == Descriptor.MessageType.BoundedMessages)
                     {
                         if (data.Equals(EoM))
                         {
@@ -215,7 +228,7 @@ namespace ParserLib
                 case ParserStatus.WaitCheckSum:
                     if (data.Equals(_CheckSum))
                     {
-                        if (Type == MessageType.SizedMessages)
+                        if (_CurrentDescriptor.Type == Descriptor.MessageType.SizedMessages)
                         {
 #pragma warning disable CS8602 // Dereferenziamento di un possibile riferimento Null.
                             ParseCompleted(_CurrentDescriptor.Id, _Data);
@@ -224,7 +237,7 @@ namespace ParserLib
                             _Status = ParserStatus.Idle;
                             return ParserResult.Completed;
                         }
-                        else if (!Type.Equals(MessageType.BoundedMessages))
+                        else if (!_CurrentDescriptor.Type.Equals(Descriptor.MessageType.BoundedMessages))
                             _Status = ParserStatus.WaitEoM;
                     }
                     else
@@ -266,6 +279,7 @@ namespace ParserLib
         {
             OnParseCompleted?.Invoke(this, new ParseCompletedEventArgs(id, data));
         }
+
         public void ParseError(ParserErrors error, byte chksum = 0)
         {
             OnParseError?.Invoke(this, new ParseErrorEventArgs(error, chksum));
